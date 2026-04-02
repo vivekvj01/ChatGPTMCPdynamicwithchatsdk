@@ -1,8 +1,13 @@
+import "dotenv/config";
+
 export type AppConfig = {
   port: number;
   appBaseUrl: string;
   salesforceAuthServiceUrl: string;
   salesforceAuthServiceSecret: string;
+  salesforceLoginUrl: string;
+  openaiApiKey: string;
+  openaiWidgetModel: string;
 };
 
 function requiredEnv(name: string, fallback = ""): string {
@@ -15,7 +20,9 @@ export function getConfig(): AppConfig {
     port: Number(process.env.PORT || 8080),
     appBaseUrl: requiredEnv("APP_BASE_URL", "http://localhost:8080"),
     salesforceAuthServiceUrl: requiredEnv("SALESFORCE_AUTH_SERVICE_URL"),
-    salesforceAuthServiceSecret: requiredEnv("SALESFORCE_AUTH_SERVICE_SECRET")
+    salesforceAuthServiceSecret: requiredEnv("SALESFORCE_AUTH_SERVICE_SECRET"),
+    salesforceLoginUrl: requiredEnv("SALESFORCE_LOGIN_URL"),
+    openaiApiKey: requiredEnv("OPENAI_API_KEY"),
+    openaiWidgetModel: requiredEnv("OPENAI_WIDGET_MODEL", "gpt-5.4-mini")
   };
 }
-

@@ -1,41 +1,25 @@
-import { randomUUID } from "node:crypto";
 import type { Express } from "express";
-import { completeRun, createRun, emitEvent, getRun, subscribeToRun } from "../runs/store.js";
+import type { RunSnapshotResult, StartDynamicRunInput } from "@chatgpt-mcp-dynamic/shared";
+import { abortRun, getRun, subscribeToRun } from "../runs/store.js";
+import type { AuthAdapter } from "../auth/adapter.js";
+import type { RunOrchestrator } from "../services/run-orchestrator.js";
+import { startDynamicRun } from "../services/start-dynamic-run.js";
 
-export function registerRunRoutes(app: Express): void {
-  app.post("/api/runs", (req, res) => {
-    const query = String(req.body?.query || "").trim();
-    if (!query) {
-      res.status(400).json({ error: "query is required" });
-      return;
+export function registerRunRoutes(
+  app: Express,
+  deps: {
+    authAdapter: AuthAdapter;
+    runOrchestrator: RunOrchestrator;
+  }
+): void {
+  app.post("/api/runs", async (req, res) => {
+    try {
+      const result = await startDynamicRun(req.body as StartDynamicRunInput, deps);
+      res.status(201).json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(400).json({ error: message });
     }
-
-    const runId = `run_${randomUUID()}`;
-    createRun(runId, query);
-
-    emitEvent(runId, {
-      type: "run-start",
-      runId,
-      timestamp: new Date().toISOString(),
-      payload: { query }
-    });
-
-    emitEvent(runId, {
-      type: "reasoning-delta",
-      runId,
-      timestamp: new Date().toISOString(),
-      payload: {
-        id: "reasoning_1",
-        delta: "Scaffold run created.\n"
-      }
-    });
-
-    res.status(201).json({
-      runId,
-      status: "started",
-      connected: false,
-      reconnectUrl: null
-    });
   });
 
   app.get("/api/runs/:runId/stream", (req, res) => {
@@ -47,27 +31,50 @@ export function registerRunRoutes(app: Express): void {
       return;
     }
 
+    if (run.status !== "running") {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Run-Active", "false");
+      res.flushHeaders?.();
+      res.write(": complete\n\n");
+      res.end();
+      return;
+    }
+
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Run-Active", "true");
+    res.flushHeaders?.();
 
-    const unsubscribe = subscribeToRun(runId, (event) => {
-      if (event === null) {
-        res.end();
-        return;
-      }
+    const keepAlive = setInterval(() => {
+      res.write(": keepalive\n\n");
+    }, 15000);
 
-      res.write(`data: ${JSON.stringify(event)}\n\n`);
-    });
+    const unsubscribe = subscribeToRun(
+      runId,
+      (event) => {
+        if (event === null) {
+          clearInterval(keepAlive);
+          res.end();
+          return;
+        }
+
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      },
+      { replay: true }
+    );
 
     req.on("close", () => {
+      clearInterval(keepAlive);
       unsubscribe?.();
     });
   });
 
   app.post("/api/runs/:runId/cancel", (req, res) => {
     const runId = String(req.params.runId || "");
-    completeRun(runId, "aborted");
+    abortRun(runId);
     res.json({ ok: true });
   });
 
@@ -80,11 +87,12 @@ export function registerRunRoutes(app: Express): void {
       return;
     }
 
-    res.json({
+    const payload: RunSnapshotResult = {
       runId: run.runId,
       status: run.status,
       events: run.events
-    });
+    };
+
+    res.json(payload);
   });
 }
-

@@ -10,6 +10,30 @@ Build the app in three milestones:
 
 This sequence is designed to get a working ChatGPT-native demo quickly while preserving the looser Anush-style widget generation strategy.
 
+## Current Implementation Status
+
+MVP status:
+
+- `Milestone 1`: implemented
+- `Milestone 2`: implemented
+- `Milestone 3`: implemented in MVP form
+
+What is in place now:
+
+- MCP `start_dynamic_run`
+- shared auth adapter with `session`, `connect`, and `agent/query` support
+- active run store with replayable events, aborts, and TTL cleanup
+- SSE stream endpoint plus snapshot replay
+- React iframe shell with reconnect, cancel, auth-required UI, and citation display
+- OpenAI-backed `visualize_read_me -> show_widget -> validate -> repair` widget engine
+- demo fallback path when upstream services are not configured
+
+What remains is product hardening and deployment polish, not missing milestone coverage:
+
+- deploy-time Apps SDK resource registration
+- persistent run storage if in-memory retention becomes insufficient
+- stricter review hardening for production distribution
+
 ## Milestone 1: Foundation
 
 Goal:
@@ -196,4 +220,3 @@ The first release is done when:
 - final widgets run interactively
 - validation and repair work for broken widget code
 - reconnect and auth-required flows are usable
-

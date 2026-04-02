@@ -43,16 +43,55 @@ This intentionally follows a looser dynamic UI strategy similar to `Anushlatest 
 
 ## Current Status
 
-This repo currently contains the build-ready documentation set. The next implementation step is to scaffold:
+This repo now includes the MVP implementation for the planned slices:
 
-1. MCP server
-2. Cloud Run service
-3. run orchestration + SSE streaming
-4. iframe renderer
-5. widget generation and repair loop
+1. MCP server with `start_dynamic_run`
+2. Cloud Run-style Express service shell
+3. shared auth adapter and `agent/query` contract
+4. run orchestration + SSE streaming
+5. iframe renderer with reconnect and snapshot replay
+6. widget generation, validation, and repair loop
+
+The current implementation supports:
+
+- `POST /api/runs`
+- `GET /api/runs/:runId/stream`
+- `GET /api/runs/:runId/snapshot`
+- `POST /api/runs/:runId/cancel`
+- `POST /mcp`
+- demo fallback when shared auth or OpenAI credentials are absent
+- OpenAI-backed widget generation when `OPENAI_API_KEY` is configured
+
+Remaining follow-on work is optional product hardening rather than missing MVP slices:
+
+- Cloud Run deployment and ChatGPT connection setup
+- deeper auth/session durability if Redis or persistent storage is needed
+- richer widget host bridges and review-time security hardening
+
+## Testing
+
+### Local
+
+1. Copy `.env.example` to `.env` and fill any available values.
+2. Run `npm install`.
+3. Run `npm run build`.
+4. Run `npm start`.
+5. Verify:
+   - `GET /healthz`
+   - `POST /mcp` with `tools/list`
+   - `POST /mcp` with `resources/list`
+   - `POST /mcp` with `resources/read` for `ui://widget/dynamic-run.html`
+6. For browser testing, open the widget dev app with `npm run dev:widget`.
+
+### ChatGPT App
+
+1. Deploy this repo to a public HTTPS URL, preferably Cloud Run.
+2. Set `APP_BASE_URL` to the final public origin.
+3. Build and start the app so `/mcp` and `/widget-assets/*` are available.
+4. In ChatGPT, connect the MCP app using your deployed `/mcp` endpoint.
+5. Invoke `start_dynamic_run` from ChatGPT and confirm that the iframe mounts `ui://widget/dynamic-run.html`.
 
 ## Reference Codebases
 
 - Shared auth pattern: `/Users/vivek.viswanathan/Desktop/FinalChatGPTApp`
 - Dynamic widget and streaming patterns: `/Users/vivek.viswanathan/Desktop/Anushlatest code`
-

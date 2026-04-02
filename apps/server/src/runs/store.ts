@@ -7,9 +7,25 @@ export type ActiveRun = {
   events: StreamEvent[];
   subscribers: Set<(event: StreamEvent | null) => void>;
   createdAt: number;
+  completedAt?: number;
+  abortController: AbortController;
+  expiresAt?: number;
+  cleanupTimer?: ReturnType<typeof setTimeout>;
 };
 
 const runs = new Map<string, ActiveRun>();
+const RUN_TTL_MS = 10 * 60 * 1000;
+
+function scheduleCleanup(run: ActiveRun): void {
+  if (run.cleanupTimer) {
+    clearTimeout(run.cleanupTimer);
+  }
+
+  run.expiresAt = Date.now() + RUN_TTL_MS;
+  run.cleanupTimer = setTimeout(() => {
+    runs.delete(run.runId);
+  }, RUN_TTL_MS);
+}
 
 export function createRun(runId: string, query: string): ActiveRun {
   const run: ActiveRun = {
@@ -18,7 +34,8 @@ export function createRun(runId: string, query: string): ActiveRun {
     status: "running",
     events: [],
     subscribers: new Set(),
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    abortController: new AbortController()
   };
 
   runs.set(runId, run);
@@ -47,24 +64,38 @@ export function completeRun(runId: string, status: Exclude<RunStatus, "running">
     return;
   }
 
+  if (run.status !== "running") {
+    return;
+  }
+
   run.status = status;
+  run.completedAt = Date.now();
+  run.abortController.abort();
   for (const subscriber of run.subscribers) {
     subscriber(null);
   }
   run.subscribers.clear();
+  scheduleCleanup(run);
+}
+
+export function abortRun(runId: string): void {
+  completeRun(runId, "aborted");
 }
 
 export function subscribeToRun(
   runId: string,
-  subscriber: (event: StreamEvent | null) => void
+  subscriber: (event: StreamEvent | null) => void,
+  options: { replay?: boolean } = {}
 ): (() => void) | null {
   const run = runs.get(runId);
   if (!run) {
     return null;
   }
 
-  for (const event of run.events) {
-    subscriber(event);
+  if (options.replay ?? true) {
+    for (const event of run.events) {
+      subscriber(event);
+    }
   }
 
   if (run.status !== "running") {
@@ -78,4 +109,3 @@ export function subscribeToRun(
     run.subscribers.delete(subscriber);
   };
 }
-

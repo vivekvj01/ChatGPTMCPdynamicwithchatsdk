@@ -9,8 +9,8 @@
   "scripts": {
     "dev:server": "npm --workspace @chatgpt-mcp-dynamic/server run dev",
     "dev:widget": "npm --workspace @chatgpt-mcp-dynamic/widget run dev",
+    "start": "node apps/server/dist/apps/server/src/index.js",
     "build": "npm run build --workspaces",
     "typecheck": "npm run typecheck --workspaces"
   }
 }
-
