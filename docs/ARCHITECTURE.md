@@ -10,7 +10,7 @@ This app is a ChatGPT-native dynamic UI application built with:
 - backend SSE streaming
 - model-generated widget HTML/CSS/JS
 
-The app is designed to run inside ChatGPT while preserving a rich streaming experience similar to `Anushlatest code`.
+The app is designed to run inside ChatGPT while preserving a rich streaming experience .
 
 ## Architectural Goals
 
@@ -74,7 +74,7 @@ Responsibilities:
 - support cancellation
 - expire old runs
 
-This should mirror the event-oriented pattern used in `Anushlatest code`.
+This would be an event-oriented pattern.
 
 ### 5. Widget Generation Service
 
@@ -137,7 +137,7 @@ Apps SDK gives ChatGPT-native app embedding, but the rich event-by-event streami
 This approach gives us:
 
 - ChatGPT-native placement
-- Anush-style streaming UX
+- streaming UX
 - freedom to render progressive widget previews
 - full control over widget execution and repair
 
@@ -159,7 +159,7 @@ Guardrails:
 - iframe sandbox
 - CSP allowlist
 
-This is closer to the current `Anushlatest code` model than a strict typed-schema renderer.
+This will now use model generated UI than a strict typed-schema renderer.
 
 ## Security Boundary
 
@@ -200,7 +200,7 @@ Reason:
 Reason:
 
 - full control over progressive rendering
-- supports Anush-style event streaming
+- supports event streaming
 
 ### Decision 3: Use backend SSE for streaming
 
