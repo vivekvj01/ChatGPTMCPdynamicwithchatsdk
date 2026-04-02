@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { designTokens } from "@chatgpt-mcp-dynamic/shared";
 import { App } from "./App";
 import "./styles.css";
 
@@ -25,27 +26,28 @@ class WidgetErrorBoundary extends React.Component<
         <main
           style={{
             padding: "24px",
-            fontFamily:
-              '"Geist", Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif',
-            background: "#f8fafc",
-            color: "#0f172a"
+            fontFamily: designTokens.fontSans,
+            background:
+              "radial-gradient(circle at top left, rgba(255,255,255,0.88), transparent 36%), linear-gradient(180deg, #f5f5f4 0%, #efefec 100%)",
+            color: designTokens.colorText
           }}
         >
           <section
             style={{
-              borderRadius: "20px",
-              border: "1px solid rgba(15, 23, 42, 0.08)",
-              background: "#ffffff",
-              padding: "20px"
+              borderRadius: designTokens.radiusCard,
+              border: `1px solid ${designTokens.colorBorder}`,
+              background: "rgba(255,255,255,0.92)",
+              padding: "20px",
+              boxShadow: designTokens.shadowCard
             }}
           >
-            <p style={{ margin: "0 0 8px", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#b45309" }}>
-              Widget Error
+            <p style={{ margin: "0 0 8px", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: designTokens.colorWarning }}>
+              Workspace Error
             </p>
-            <h1 style={{ margin: "0 0 8px", fontSize: "20px", fontWeight: 500 }}>
-              The ChatGPT widget failed to render.
+            <h1 style={{ margin: "0 0 8px", fontSize: "24px", fontWeight: 500, letterSpacing: "-0.02em" }}>
+              The workspace could not render.
             </h1>
-            <p style={{ margin: 0, lineHeight: 1.6 }}>{this.state.error}</p>
+            <p style={{ margin: 0, lineHeight: 1.6, color: designTokens.colorTextSecondary }}>{this.state.error}</p>
           </section>
         </main>
       );

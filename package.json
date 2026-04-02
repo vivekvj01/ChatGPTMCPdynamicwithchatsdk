@@ -10,7 +10,7 @@
     "dev:server": "npm --workspace @chatgpt-mcp-dynamic/server run dev",
     "dev:widget": "npm --workspace @chatgpt-mcp-dynamic/widget run dev",
     "start": "node apps/server/dist/apps/server/src/index.js",
-    "build": "npm run build --workspaces",
-    "typecheck": "npm run typecheck --workspaces"
+    "build": "npm --workspace @chatgpt-mcp-dynamic/shared run build && npm --workspace @chatgpt-mcp-dynamic/server run build && npm --workspace @chatgpt-mcp-dynamic/widget run build",
+    "typecheck": "npm --workspace @chatgpt-mcp-dynamic/shared run typecheck && npm --workspace @chatgpt-mcp-dynamic/server run typecheck && npm --workspace @chatgpt-mcp-dynamic/widget run typecheck"
   }
 }

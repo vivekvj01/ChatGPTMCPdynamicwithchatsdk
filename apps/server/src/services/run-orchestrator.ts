@@ -30,6 +30,21 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
+function formatPhaseNarration(name: string, detail: string): string {
+  switch (name) {
+    case "visualize_read_me":
+      return `Planned the workspace structure. ${detail}`;
+    case "show_widget":
+      return `Composed the workspace artifact. ${detail}`;
+    case "validate_widget":
+      return `Checked the workspace code. ${detail}`;
+    case "repair_widget":
+      return `Adjusted the workspace after a generation issue. ${detail}`;
+    default:
+      return detail;
+  }
+}
+
 export class RunOrchestrator {
   constructor(
     private readonly authAdapter: AuthAdapter,
@@ -365,7 +380,7 @@ export class RunOrchestrator {
           runId,
           createStreamEvent("reasoning-delta", runId, {
             id: reasoningId,
-            delta: `${phase.name}: ${phase.detail}\n`
+            delta: `${formatPhaseNarration(phase.name, phase.detail)}\n`
           })
         );
       }

@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { buildInlineTokenCss, designTokens } from "@chatgpt-mcp-dynamic/shared";
 import type { AppConfig } from "../config.js";
 import { resolveWidgetDistDir } from "../paths.js";
 
@@ -44,6 +45,7 @@ async function inlineBuiltWidgetHtml(baseUrl: string): Promise<string> {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>${buildInlineTokenCss()}</style>
     <style>${styleContent}</style>
   </head>
   <body>
@@ -63,23 +65,29 @@ function fallbackWidgetHtml(baseUrl: string): string {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <style>
+      ${buildInlineTokenCss()}
       body {
         margin: 0;
         padding: 24px;
-        font-family: "Geist", Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+        font-family: var(--font-sans);
         font-feature-settings: "cv03", "cv04", "cv11";
-        background: #f8fafc;
-        color: #0f172a;
+        background:
+          radial-gradient(circle at top left, rgba(255,255,255,0.88), transparent 36%),
+          linear-gradient(180deg, ${designTokens.colorBg} 0%, #efefec 100%);
+        color: var(--color-text);
       }
       .card {
-        border-radius: 20px;
-        background: #fff;
-        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: var(--radius-card);
+        background: rgba(255,255,255,0.92);
+        border: 1px solid var(--color-border);
         padding: 20px;
+        box-shadow: var(--shadow-card);
       }
       code {
-        font-family: "SF Mono", "Fira Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-family: var(--font-mono);
       }
+      p { color: var(--color-text-secondary); line-height: 1.6; }
+      h1 { margin: 0 0 10px; font-size: 24px; letter-spacing: -0.02em; }
     </style>
   </head>
   <body>

@@ -1,4 +1,5 @@
 import { Script } from "node:vm";
+import { buildInlineTokenCss } from "@chatgpt-mcp-dynamic/shared";
 import type { AppConfig } from "../config.js";
 import type { SharedCitation } from "../auth/adapter.js";
 
@@ -38,6 +39,92 @@ type WidgetPlan = {
   assistant_text?: string;
 };
 
+const VISUALIZE_SYSTEM_PROMPT = [
+  "You choose the smallest correct visual guidance module set for a dynamic widget.",
+  "Return JSON only.",
+  "Be selective. Fewer modules is better unless the request genuinely needs more than one.",
+  "interactive: use when the user should explore, compare, filter, or take follow-up actions.",
+  "chart: use when the grounded result contains numeric comparisons, trends, rankings, or measures that benefit from visual encoding.",
+  "mockup: use for record views, workspaces, cards, dashboard shells, and operational layouts.",
+  "diagram: use for process explanations, architecture, workflows, and relationships rather than live record presentation.",
+  "slds2: use when the content is strongly Salesforce CRM data or should feel Salesforce-native without copying Lightning exactly.",
+  "art: almost never use for business search results; reserve it for explicit illustration/art requests."
+].join(" ");
+
+const WIDGET_SYSTEM_PROMPT = [
+  "You generate polished inline widget HTML fragments for a ChatGPT app.",
+  "Return JSON only.",
+  "The widget_code must be a fragment only: style first, HTML next, script last.",
+  "Do not include markdown fences or a full document shell.",
+  "This widget appears inside a refined ChatGPT artifact frame, so the fragment should feel intentional and editorial, not like a generic admin dashboard.",
+  "Use a warm, high-craft product language: broad layout, calm surfaces, careful hierarchy, and restrained color.",
+  "Inline JavaScript is allowed.",
+  "Prefer one dominant visual surface and one strong primary insight above the fold.",
+  "Do not fabricate precise metrics, counts, dates, or rankings that are not supported by the grounded answer.",
+  "If the grounded answer is qualitative, present qualitative synthesis instead of invented KPI cards.",
+  "If the data is Salesforce-oriented, use a Salesforce-friendly visual language without copying Salesforce chrome exactly.",
+  "Avoid generic placeholder structures like three arbitrary stats plus one button unless the grounded answer truly supports them.",
+  "Use sendPrompt('...') only for high-value follow-up actions that benefit from the model reasoning further.",
+  "Use openLink(url) or normal links only when a citation or record action is actually present."
+].join(" ");
+
+const REPAIR_SYSTEM_PROMPT = [
+  "You repair inline widget HTML, CSS, and JS for a ChatGPT app.",
+  "Return JSON only.",
+  "Preserve the visual and interaction intent while fixing code issues.",
+  "Do not simplify the widget into a generic card unless the broken code gives you no other safe path.",
+  "Keep the layout broad and intentional.",
+  "If the grounded answer is qualitative, preserve qualitative presentation rather than inventing KPI tiles.",
+  "Do not invent unsupported metrics or content while repairing.",
+  "Do not return a full HTML document. Return only the fragment."
+].join(" ");
+
+function buildVisualizeUserPrompt(input: WidgetGenerationInput): string {
+  const groundedText = String(input.groundedText || "").trim();
+
+  return [
+    "Select widget design modules for this request.",
+    `Query: ${input.query}`,
+    input.upstreamMode ? `Grounded source mode: ${input.upstreamMode}` : "",
+    groundedText ? `Grounded result summary:\n${groundedText}` : "",
+    "Available modules: interactive, chart, mockup, diagram, art, slds2",
+    "Guidance:",
+    "- Prefer mockup + slds2 for Salesforce record/workspace views.",
+    "- Add chart only when there is clear quantitative structure to visualize.",
+    "- Add interactive when the user should compare, inspect, filter, or continue the workflow.",
+    "- Prefer diagram for explanatory 'how it works' requests, not live CRM result views.",
+    "- Avoid art for operational business queries."
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function buildWidgetUserPrompt(input: WidgetGenerationInput, selectedModules: string[]): string {
+  const groundedText = String(input.groundedText || "").trim();
+  const citations = input.citations || [];
+
+  return [
+    `User query: ${input.query}`,
+    `Selected modules: ${selectedModules.join(", ")}`,
+    input.upstreamMode ? `Grounded source mode: ${input.upstreamMode}` : "",
+    groundedText ? `Grounded answer:\n${groundedText}` : "",
+    citations.length > 0
+      ? `Citations:\n${citations.map((citation) => `- ${citation.label}: ${citation.url}`).join("\n")}`
+      : "",
+    "Design requirements:",
+    "- Make the first screen feel like a finished artifact, not a wireframe.",
+    "- Use concise labels and strong hierarchy.",
+    "- Show one main insight first, then supporting structure.",
+    "- If the grounded answer lacks numeric detail, do not invent stat cards. Use narrative panels, lists, timelines, evidence, or action areas instead.",
+    "- If you do show metrics, they must be supported by the grounded answer.",
+    "- Keep the fragment fully self-contained.",
+    "- Produce loading_messages that sound product-like, not technical.",
+    "Return title, loading_messages, widget_code, and assistant_text."
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -47,17 +134,45 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
+function splitIntoSentences(text: string): string[] {
+  return String(text || "")
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function buildEvidenceItems(text: string): string[] {
+  const sentences = splitIntoSentences(text);
+  if (sentences.length > 0) {
+    return sentences.slice(0, 4);
+  }
+
+  return String(text || "")
+    .split(/\n+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
+function inferFollowUpPrompt(query: string): string {
+  const normalized = query.trim();
+  if (!normalized) {
+    return "Show me the strongest supporting evidence for this workspace.";
+  }
+  return `Go deeper on: ${normalized}`;
+}
+
 export function buildWidgetPreviewHtml(query: string): string {
   const label = escapeHtml(query.trim() || "Preparing workspace");
   return [
     "<style>",
     ":root { color-scheme: light; }",
-    ':root { --font-sans: "Geist", Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif; --font-serif: "Instrument Serif", Georgia, "Times New Roman", serif; --font-mono: "SF Mono", "Fira Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }',
-    'body { margin: 0; font-family: var(--font-sans); font-feature-settings: "cv03", "cv04", "cv11"; background: linear-gradient(180deg, #f7f4ed 0%, #ffffff 100%); color: #1f2937; }',
-    ".preview-shell { padding: 20px; border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 20px; background: rgba(255,255,255,0.88); box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08); }",
+    buildInlineTokenCss(),
+    'body { margin: 0; font-family: var(--font-sans); font-feature-settings: "cv03", "cv04", "cv11"; background: linear-gradient(180deg, #f7f4ed 0%, #ffffff 100%); color: var(--color-text); }',
+    ".preview-shell { padding: 20px; border: 1px solid var(--color-border); border-radius: var(--radius-inner); background: rgba(255,255,255,0.9); box-shadow: var(--shadow-card); }",
     ".preview-label { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #8b5e3c; margin-bottom: 10px; }",
     ".preview-title { font-family: var(--font-serif); font-size: 30px; font-weight: 400; letter-spacing: -0.03em; line-height: 0.98; margin: 0 0 8px; }",
-    ".preview-copy { font-size: 14px; color: #475569; margin: 0; }",
+    ".preview-copy { font-size: 14px; color: var(--color-text-secondary); margin: 0; }",
     ".preview-bar { margin-top: 18px; height: 10px; border-radius: 999px; background: linear-gradient(90deg, #d97706, #f59e0b, #fde68a); background-size: 180% 100%; animation: sweep 1.4s ease-in-out infinite; }",
     "@keyframes sweep { 0% { background-position: 100% 0; } 100% { background-position: -80% 0; } }",
     "</style>",
@@ -85,35 +200,42 @@ function buildCitationList(citations: SharedCitation[] = []): string {
 export function buildFinalWidgetHtml(input: WidgetGenerationInput): string {
   const query = input.query;
   const label = escapeHtml(query.trim() || "Dynamic workspace");
-  const groundedText = escapeHtml(
-    String(input.groundedText || "This widget is rendered from the orchestration pipeline and will be replaced by a model-authored fragment when OpenAI credentials are configured.").trim()
-  );
+  const groundedText = String(
+    input.groundedText ||
+      "The workspace is waiting for a grounded result. When one arrives, this artifact will reshape around the evidence."
+  ).trim();
+  const evidenceItems = buildEvidenceItems(groundedText);
+  const followUpPrompt = escapeHtml(inferFollowUpPrompt(query));
   return [
     "<style>",
     ":root { color-scheme: light; }",
-    ':root { --font-sans: "Geist", Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif; --font-serif: "Instrument Serif", Georgia, "Times New Roman", serif; --font-mono: "SF Mono", "Fira Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }',
-    'body { margin: 0; font-family: var(--font-sans); font-feature-settings: "cv03", "cv04", "cv11"; background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); color: #0f172a; }',
+    buildInlineTokenCss(),
+    'body { margin: 0; font-family: var(--font-sans); font-feature-settings: "cv03", "cv04", "cv11"; background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); color: var(--color-text); }',
     ".workspace { padding: 22px; display: grid; gap: 16px; }",
     ".hero { padding: 20px; border-radius: 24px; background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%); color: #fff; box-shadow: 0 24px 60px rgba(30, 41, 59, 0.25); }",
     ".eyebrow { font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; opacity: 0.72; margin-bottom: 12px; }",
     ".hero h1 { margin: 0 0 10px; font-family: var(--font-serif); font-size: 34px; font-weight: 400; letter-spacing: -0.03em; line-height: 0.98; }",
     ".hero p { margin: 0; font-size: 14px; color: rgba(255,255,255,0.82); }",
-    ".metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }",
-    ".metric { padding: 16px; border-radius: 18px; background: rgba(255,255,255,0.92); border: 1px solid rgba(148, 163, 184, 0.2); }",
-    ".metric-label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; }",
-    ".metric-value { margin-top: 8px; font-size: 26px; font-weight: 500; }",
+    ".evidence-grid { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 12px; }",
     ".panel { padding: 18px; border-radius: 20px; background: rgba(255,255,255,0.92); border: 1px solid rgba(148, 163, 184, 0.18); }",
-    ".bar-row { display: grid; gap: 10px; margin-top: 12px; }",
-    ".bar { height: 10px; border-radius: 999px; background: linear-gradient(90deg, #1d4ed8 var(--value), #e2e8f0 var(--value)); }",
-    ".action { margin-top: 12px; display: inline-flex; padding: 10px 14px; border-radius: 999px; background: #0f172a; color: #fff; text-decoration: none; font-weight: 600; }",
+    ".panel h2 { margin: 0 0 10px; font-size: 18px; letter-spacing: -0.02em; }",
+    ".evidence-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }",
+    ".evidence-list li { position: relative; padding-left: 18px; line-height: 1.55; color: var(--color-text-secondary); }",
+    ".evidence-list li::before { content: ''; position: absolute; left: 0; top: 0.65em; width: 8px; height: 8px; border-radius: 999px; background: var(--color-accent-soft); box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.2); }",
+    ".summary-card { display: grid; gap: 12px; align-content: start; }",
+    ".summary-kicker { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-text-muted); }",
+    ".summary-copy { margin: 0; font-size: 14px; line-height: 1.6; color: var(--color-text-secondary); }",
+    ".action { margin-top: 6px; display: inline-flex; padding: 10px 14px; border-radius: 999px; background: #0f172a; color: #fff; text-decoration: none; font-weight: 600; border: 0; cursor: pointer; }",
+    ".action.secondary { background: rgba(37, 99, 235, 0.08); color: var(--color-accent); }",
     ".citation-list { display: grid; gap: 8px; margin-top: 12px; }",
     ".citation { color: #1d4ed8; text-decoration: none; font-weight: 600; }",
-    "@media (max-width: 720px) { .metrics { grid-template-columns: 1fr; } }",
+    "@media (max-width: 720px) { .evidence-grid { grid-template-columns: 1fr; } }",
     "</style>",
     `<div class="workspace">`,
-    `<section class="hero"><div class="eyebrow">Dynamic Run</div><h1>${label}</h1><p>${groundedText}</p></section>`,
-    `<section class="metrics"><div class="metric"><div class="metric-label">Opportunities</div><div class="metric-value">4</div></div><div class="metric"><div class="metric-label">At Risk</div><div class="metric-value">2</div></div><div class="metric"><div class="metric-label">Next Action</div><div class="metric-value">Now</div></div></section>`,
-    `<section class="panel"><strong>Momentum</strong><div class="bar-row"><div class="bar" style="--value: 82%;"></div><div class="bar" style="--value: 61%;"></div><div class="bar" style="--value: 44%;"></div></div><a class="action" href="https://example.com" target="_blank" rel="noreferrer">Open supporting workflow</a></section>`,
+    `<section class="hero"><div class="eyebrow">Dynamic Run</div><h1>${label}</h1><p>${escapeHtml(groundedText)}</p></section>`,
+    `<section class="evidence-grid"><section class="panel"><h2>Evidence snapshot</h2><ul class="evidence-list">${evidenceItems
+      .map((item) => `<li>${escapeHtml(item)}</li>`)
+      .join("")}</ul></section><section class="panel summary-card"><div class="summary-kicker">Next move</div><p class="summary-copy">Keep exploring the grounded result, inspect supporting sources, or ask the model to dig deeper on one thread.</p><button class="action" onclick="sendPrompt('${followUpPrompt}')">Go deeper</button><button class="action secondary" onclick="sendPrompt('Summarize the strongest supporting evidence for this result.')">Summarize evidence</button></section></section>`,
     buildCitationList(input.citations),
     "</div>"
   ].join("");
@@ -125,7 +247,7 @@ export function buildAnswerText(input: WidgetGenerationInput): string {
   }
 
   const label = input.query.trim() || "the requested workflow";
-  return `I started a grounded dynamic run for ${label} and assembled a live workspace with reasoning, streamed text, and an interactive widget shell. This first slice is ready for the full visualize_read_me and show_widget model flow.`;
+  return `I started a grounded dynamic run for ${label} and assembled a live workspace with reasoning, streamed text, and an interactive artifact view.`;
 }
 
 function sanitizeModules(modules: unknown): string[] {
@@ -158,6 +280,15 @@ function inferFallbackModules(query: string): string[] {
 }
 
 function validateWidgetCode(widgetCode: string): string | null {
+  const normalized = String(widgetCode || "").trim();
+  if (!normalized) {
+    return "Widget code is empty.";
+  }
+
+  if (/<!doctype|<html\b|<head\b|<body\b/i.test(normalized)) {
+    return "Widget code must be an inline fragment, not a full HTML document.";
+  }
+
   const scriptTagPattern = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
   const inlineScripts: string[] = [];
   let match: RegExpExecArray | null = null;
@@ -192,6 +323,15 @@ function validateWidgetCode(widgetCode: string): string | null {
   }
 
   return null;
+}
+
+function buildFallbackReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!message.trim()) {
+    return "OpenAI widget generation was unavailable.";
+  }
+
+  return `The workspace kept the grounded answer intact while switching to a resilient fallback artifact because ${message.replace(/\.$/, "")}.`;
 }
 
 async function parseStructuredResponse<T>(
@@ -269,16 +409,8 @@ async function runOpenAiWidgetEngine(
 
   const visualize = await callResponsesApi<VisualizePlan>({
     config,
-    system:
-      "You choose the smallest correct visual guidance module set for a dynamic widget. Return JSON only.",
-    user: [
-      "Select widget design modules for this request.",
-      `Query: ${query}`,
-      groundedText ? `Grounded result summary:\n${groundedText}` : "",
-      "Available modules: interactive, chart, mockup, diagram, art, slds2"
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
+    system: VISUALIZE_SYSTEM_PROMPT,
+    user: buildVisualizeUserPrompt(input),
     schemaName: "visualize_plan",
     schema: {
       type: "object",
@@ -302,29 +434,8 @@ async function runOpenAiWidgetEngine(
 
   const widgetPlan = await callResponsesApi<WidgetPlan>({
     config,
-    system: [
-      "You generate polished inline widget HTML fragments for a ChatGPT app.",
-      "Return JSON only.",
-      "The widget_code must be a fragment only: style first, HTML next, script last.",
-      "Do not include markdown fences or a full document shell.",
-      "Keep the UI polished and broad, not tiny or generic.",
-      "Inline JavaScript is allowed.",
-      "This should feel closer to a dynamic Claude-style artifact than a simple card.",
-      "Prefer visible primary insight above the fold, dense metrics, and one dominant visual surface.",
-      "If the data is Salesforce-oriented, use a Salesforce-friendly visual language without copying Salesforce chrome exactly."
-    ].join(" "),
-    user: [
-      `User query: ${query}`,
-      `Selected modules: ${selectedModules.join(", ")}`,
-      input.upstreamMode ? `Grounded source mode: ${input.upstreamMode}` : "",
-      groundedText ? `Grounded answer:\n${groundedText}` : "",
-      citations.length > 0
-        ? `Citations:\n${citations.map((citation) => `- ${citation.label}: ${citation.url}`).join("\n")}`
-        : "",
-      "Return title, loading_messages, widget_code, and assistant_text."
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
+    system: WIDGET_SYSTEM_PROMPT,
+    user: buildWidgetUserPrompt(input, selectedModules),
     schemaName: "widget_plan",
     schema: {
       type: "object",
@@ -350,11 +461,7 @@ async function runOpenAiWidgetEngine(
   if (validationError) {
     const repairedWidget = await callResponsesApi<WidgetPlan>({
       config,
-      system: [
-        "You repair inline widget HTML, CSS, and JS for a ChatGPT app.",
-        "Return JSON only.",
-        "Preserve the visual and interaction intent while fixing code issues."
-      ].join(" "),
+      system: REPAIR_SYSTEM_PROMPT,
       user: [
         `User query: ${query}`,
         `Validation error: ${validationError}`,
@@ -426,8 +533,12 @@ async function runOpenAiWidgetEngine(
   };
 }
 
-function runDemoWidgetEngine(input: WidgetGenerationInput): WidgetGenerationResult {
+function runDemoWidgetEngine(
+  input: WidgetGenerationInput,
+  options?: { fallbackReason?: string }
+): WidgetGenerationResult {
   const modules = inferFallbackModules(input.query);
+  const fallbackReason = String(options?.fallbackReason || "").trim();
   return {
     provider: "demo",
     title: "dynamic_run_workspace",
@@ -440,16 +551,24 @@ function runDemoWidgetEngine(input: WidgetGenerationInput): WidgetGenerationResu
     phases: [
       {
         name: "visualize_read_me",
-        detail: `Demo selected modules: ${modules.join(", ")}`
+        detail: `Selected modules: ${modules.join(", ")}`
       },
       {
         name: "show_widget",
-        detail: "Demo widget generated."
+        detail: fallbackReason ? "Generated a resilient fallback workspace." : "Generated grounded artifact workspace."
       },
       {
         name: "validate_widget",
-        detail: "Demo widget is prevalidated."
-      }
+        detail: "Widget template passed validation."
+      },
+      ...(fallbackReason
+        ? [
+            {
+              name: "repair_widget" as const,
+              detail: fallbackReason
+            }
+          ]
+        : [])
     ]
   };
 }
@@ -474,7 +593,9 @@ export class WidgetEngine {
       return await runOpenAiWidgetEngine(this.config, input);
     } catch (error) {
       console.warn("[widget-engine] openai generation failed, falling back to demo", error);
-      return runDemoWidgetEngine(input);
+      return runDemoWidgetEngine(input, {
+        fallbackReason: buildFallbackReason(error)
+      });
     }
   }
 }
