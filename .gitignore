@@ -1,0 +1,17 @@
+node_modules
+dist
+build
+.DS_Store
+.env
+.env.local
+.env.*
+!.env.example
+.turbo
+coverage
+.vite
+apps/widget/src/*.js
+apps/widget/src/*.d.ts
+apps/widget/vite.config.js
+apps/widget/vite.config.d.ts
+packages/shared/src/*.js
+packages/shared/src/*.d.ts

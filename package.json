@@ -1,0 +1,16 @@
+{
+  "name": "chatgpt-mcp-dynamic",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:server": "npm --workspace @chatgpt-mcp-dynamic/server run dev",
+    "dev:widget": "npm --workspace @chatgpt-mcp-dynamic/widget run dev",
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces"
+  }
+}
+

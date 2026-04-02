@@ -1,0 +1,63 @@
+:root {
+  font-family: Inter, system-ui, sans-serif;
+  color: #1b1f29;
+  background: #f7f5ef;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app-shell {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px;
+  display: grid;
+  gap: 16px;
+}
+
+.hero,
+.panel {
+  background: #ffffff;
+  border: 1px solid rgba(27, 31, 41, 0.08);
+  border-radius: 20px;
+  padding: 20px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6f7785;
+}
+
+.hero h1,
+.panel h2 {
+  margin: 0 0 8px;
+}
+
+.copy {
+  margin: 0;
+  color: #4f5868;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  color: #334155;
+}
+
