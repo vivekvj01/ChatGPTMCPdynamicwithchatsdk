@@ -3,6 +3,7 @@ import type { StartDynamicRunInput, StartDynamicRunResult } from "@chatgpt-mcp-d
 import { createRun } from "../runs/store.js";
 import type { AuthAdapter } from "../auth/adapter.js";
 import type { RunOrchestrator } from "./run-orchestrator.js";
+import { getConfig } from "../config.js";
 
 export async function startDynamicRun(
   input: StartDynamicRunInput,
@@ -11,6 +12,7 @@ export async function startDynamicRun(
     runOrchestrator: RunOrchestrator;
   }
 ): Promise<StartDynamicRunResult> {
+  const config = getConfig();
   const query = String(input.query || "").trim();
   if (!query) {
     throw new Error("query is required");
@@ -29,6 +31,7 @@ export async function startDynamicRun(
     status: "started",
     connected: auth.connected,
     reconnectUrl: auth.reconnectUrl,
+    apiBaseUrl: config.appBaseUrl,
     streamPath: `/api/runs/${runId}/stream`
   };
 }

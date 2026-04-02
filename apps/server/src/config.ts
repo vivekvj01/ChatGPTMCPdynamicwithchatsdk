@@ -5,7 +5,11 @@ export type AppConfig = {
   appBaseUrl: string;
   salesforceAuthServiceUrl: string;
   salesforceAuthServiceSecret: string;
+  salesforceAgentId: string;
+  salesforceTenantId: string;
+  salesforceRegion: string;
   salesforceLoginUrl: string;
+  salesforceAgentApiBaseUrl: string;
   openaiApiKey: string;
   openaiWidgetModel: string;
 };
@@ -21,7 +25,11 @@ export function getConfig(): AppConfig {
     appBaseUrl: requiredEnv("APP_BASE_URL", "http://localhost:8080"),
     salesforceAuthServiceUrl: requiredEnv("SALESFORCE_AUTH_SERVICE_URL"),
     salesforceAuthServiceSecret: requiredEnv("SALESFORCE_AUTH_SERVICE_SECRET"),
+    salesforceAgentId: requiredEnv("SALESFORCE_AGENT_ID"),
+    salesforceTenantId: requiredEnv("SALESFORCE_TENANT_ID"),
+    salesforceRegion: requiredEnv("SALESFORCE_REGION"),
     salesforceLoginUrl: requiredEnv("SALESFORCE_LOGIN_URL"),
+    salesforceAgentApiBaseUrl: requiredEnv("SALESFORCE_AGENT_API_BASE_URL"),
     openaiApiKey: requiredEnv("OPENAI_API_KEY"),
     openaiWidgetModel: requiredEnv("OPENAI_WIDGET_MODEL", "gpt-5.4-mini")
   };

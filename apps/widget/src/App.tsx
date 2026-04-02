@@ -44,6 +44,9 @@ type HostToolResultMessage = {
 declare global {
   interface Window {
     openai?: OpenAiBridge;
+    __DYNAMIC_WIDGET_CONFIG__?: {
+      appBaseUrl?: string;
+    };
   }
 }
 
@@ -52,8 +55,49 @@ function getInitialRunId(): string {
   return params.get("runId") || "";
 }
 
+function safeSerialize(value: unknown): string {
+  const seen = new WeakSet<object>();
+
+  try {
+    return JSON.stringify(
+      value,
+      (_key, currentValue) => {
+        if (typeof currentValue === "function") {
+          return "[Function]";
+        }
+        if (typeof currentValue === "bigint") {
+          return String(currentValue);
+        }
+        if (currentValue && typeof currentValue === "object") {
+          if (seen.has(currentValue as object)) {
+            return "[Circular]";
+          }
+          seen.add(currentValue as object);
+        }
+        return currentValue;
+      },
+      2
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `"[Unserializable: ${message}]"`;
+  }
+}
+
+function normalizeBridgeRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(safeSerialize(value)) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
 function eventKey(event: StreamEvent): string {
-  return `${event.type}:${event.timestamp}:${JSON.stringify(event.payload)}`;
+  return `${event.type}:${event.timestamp}:${safeSerialize(event.payload)}`;
 }
 
 function mergeEvents(current: StreamEvent[], incoming: StreamEvent[]): StreamEvent[] {
@@ -75,12 +119,39 @@ function mergeEvents(current: StreamEvent[], incoming: StreamEvent[]): StreamEve
 function buildWidgetDocument(widgetCode: string): string {
   const safeCode = widgetCode.replace(/<\/script/gi, "<\\/script");
   const bridgeScript = `
+    const reportHeight = () => {
+      const body = document.body;
+      const doc = document.documentElement;
+      const height = Math.max(
+        body ? body.scrollHeight : 0,
+        body ? body.offsetHeight : 0,
+        doc ? doc.scrollHeight : 0,
+        doc ? doc.offsetHeight : 0
+      );
+      parent.postMessage({ source: "dynamic-widget-bridge", type: "resize", height }, "*");
+    };
     window.openLink = (url) => {
       parent.postMessage({ source: "dynamic-widget-bridge", type: "open-link", href: String(url || "") }, "*");
     };
     window.sendPrompt = (text) => {
       parent.postMessage({ source: "dynamic-widget-bridge", type: "send-prompt", prompt: String(text || "") }, "*");
     };
+    window.addEventListener("load", () => {
+      reportHeight();
+      if ("ResizeObserver" in window) {
+        const observer = new ResizeObserver(() => reportHeight());
+        observer.observe(document.documentElement);
+        if (document.body) {
+          observer.observe(document.body);
+        }
+      } else {
+        setInterval(reportHeight, 250);
+      }
+    });
+    window.addEventListener("resize", reportHeight);
+    setTimeout(reportHeight, 0);
+    setTimeout(reportHeight, 100);
+    setTimeout(reportHeight, 500);
   `;
 
   return `<!doctype html>
@@ -90,8 +161,13 @@ function buildWidgetDocument(widgetCode: string): string {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; script-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://esm.sh; font-src https: data:; connect-src https:; frame-src 'none';" />
     <style>
-      html, body { margin: 0; padding: 0; background: transparent; }
-      body { font-family: Inter, system-ui, sans-serif; }
+      :root {
+        --font-sans: "Geist", Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+        --font-serif: "Instrument Serif", Georgia, "Times New Roman", serif;
+        --font-mono: "SF Mono", "Fira Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+      body { font-family: var(--font-sans); font-feature-settings: "cv03", "cv04", "cv11"; }
     </style>
   </head>
   <body>
@@ -162,6 +238,9 @@ function deriveState(events: StreamEvent[]): DerivedState {
           })
           .filter((citation) => citation.url);
       }
+      if (typeof output.reconnectUrl === "string" && output.reconnectUrl.trim()) {
+        reconnectUrl = output.reconnectUrl.trim();
+      }
       const nextWidgetCode = String(output.widget_code || "").trim();
       if (nextWidgetCode) {
         widgetTitle = String(output.title || widgetTitle || "Generated Widget");
@@ -216,6 +295,33 @@ function extractQuery(value: unknown): string {
   return String((value as Record<string, unknown>).query || "").trim();
 }
 
+function resolveApiBaseUrl(hostToolOutput: Record<string, unknown>): string {
+  const explicitBaseUrl = String(hostToolOutput.apiBaseUrl || "").trim();
+  if (explicitBaseUrl) {
+    return explicitBaseUrl;
+  }
+
+  const runtimeBaseUrl = String(window.__DYNAMIC_WIDGET_CONFIG__?.appBaseUrl || "").trim();
+  if (runtimeBaseUrl) {
+    return runtimeBaseUrl;
+  }
+
+  if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+    return window.location.origin;
+  }
+
+  return "";
+}
+
+function buildApiUrl(pathname: string, hostToolOutput: Record<string, unknown>): string {
+  const baseUrl = resolveApiBaseUrl(hostToolOutput);
+  if (!baseUrl) {
+    return pathname;
+  }
+
+  return new URL(pathname, baseUrl).toString();
+}
+
 export function App() {
   const [runId, setRunId] = useState(getInitialRunId());
   const [query, setQuery] = useState("Show me the first slice of the dynamic workspace");
@@ -223,19 +329,49 @@ export function App() {
   const [connected, setConnected] = useState(false);
   const [starting, setStarting] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [connectionError, setConnectionError] = useState("");
+  const [widgetFrameHeight, setWidgetFrameHeight] = useState(480);
   const [retryToken, setRetryToken] = useState(0);
-  const [hostToolInput, setHostToolInput] = useState<Record<string, unknown>>(
-    window.openai?.toolInput || {}
+  const [hostToolInput, setHostToolInput] = useState<Record<string, unknown>>(() =>
+    normalizeBridgeRecord(window.openai?.toolInput)
   );
-  const [hostToolOutput, setHostToolOutput] = useState<Record<string, unknown>>(
-    window.openai?.toolOutput || {}
+  const [hostToolOutput, setHostToolOutput] = useState<Record<string, unknown>>(() =>
+    normalizeBridgeRecord(window.openai?.toolOutput)
   );
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const derived = useMemo(() => deriveState(events), [events]);
   const hostMode = Boolean(window.openai);
 
+  async function handleReconnectSalesforce() {
+    if (derived.reconnectUrl) {
+      if (window.openai?.openExternal) {
+        await window.openai.openExternal({ href: derived.reconnectUrl, redirectUrl: false });
+      } else {
+        window.open(derived.reconnectUrl, "_blank", "noopener,noreferrer");
+      }
+      return;
+    }
+
+    if (!window.openai?.callTool) {
+      return;
+    }
+
+    const result = await window.openai.callTool("connect_salesforce", {});
+    const structured = (result?.structuredContent || {}) as Record<string, unknown>;
+    const reconnectUrl = String(structured.reconnectUrl || "").trim();
+    if (!reconnectUrl) {
+      throw new Error("No reconnect URL was returned by the ChatGPT host.");
+    }
+
+    if (window.openai?.openExternal) {
+      await window.openai.openExternal({ href: reconnectUrl, redirectUrl: false });
+    } else {
+      window.open(reconnectUrl, "_blank", "noopener,noreferrer");
+    }
+  }
+
   async function loadSnapshot(targetRunId: string): Promise<RunSnapshotResult | null> {
-    const response = await fetch(`/api/runs/${targetRunId}/snapshot`);
+    const response = await fetch(buildApiUrl(`/api/runs/${targetRunId}/snapshot`, hostToolOutput));
     if (response.status === 404) {
       return null;
     }
@@ -251,7 +387,7 @@ export function App() {
 
   async function startRunViaHost() {
     const result = await window.openai?.callTool?.("start_dynamic_run", { query });
-    const structured = (result?.structuredContent || {}) as Record<string, unknown>;
+    const structured = normalizeBridgeRecord(result?.structuredContent);
     const nextRunId = extractRunId(structured);
     if (!nextRunId) {
       throw new Error("ChatGPT host did not return a runId.");
@@ -263,7 +399,7 @@ export function App() {
   }
 
   async function startRunViaLocalApi() {
-    const response = await fetch("/api/runs", {
+    const response = await fetch(buildApiUrl("/api/runs", hostToolOutput), {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -289,6 +425,7 @@ export function App() {
     setStarting(true);
     setEvents([]);
     setConnected(false);
+    setConnectionError("");
 
     try {
       if (window.openai?.callTool) {
@@ -316,7 +453,7 @@ export function App() {
       return;
     }
 
-    await fetch(`/api/runs/${runId}/cancel`, { method: "POST" });
+    await fetch(buildApiUrl(`/api/runs/${runId}/cancel`, hostToolOutput), { method: "POST" });
     await loadSnapshot(runId).catch(() => null);
   }
 
@@ -337,7 +474,7 @@ export function App() {
       const nextToolOutput = detail?.globals?.toolOutput;
 
       if (nextToolInput) {
-        setHostToolInput(nextToolInput);
+        setHostToolInput(normalizeBridgeRecord(nextToolInput));
         const nextQuery = extractQuery(nextToolInput);
         if (nextQuery) {
           setQuery(nextQuery);
@@ -345,7 +482,7 @@ export function App() {
       }
 
       if (nextToolOutput) {
-        setHostToolOutput(nextToolOutput);
+        setHostToolOutput(normalizeBridgeRecord(nextToolOutput));
         const nextRunId = extractRunId(nextToolOutput);
         if (nextRunId) {
           setRunId(nextRunId);
@@ -356,6 +493,14 @@ export function App() {
     function handleHostMessage(event: MessageEvent<HostToolResultMessage | Record<string, unknown>>) {
       if (event.source === frameRef.current?.contentWindow) {
         const data = event.data as Record<string, unknown>;
+        if (data?.source === "dynamic-widget-bridge" && data.type === "resize") {
+          const nextHeight = Number(data.height || 0);
+          if (Number.isFinite(nextHeight) && nextHeight > 0) {
+            setWidgetFrameHeight(Math.max(240, Math.ceil(nextHeight) + 8));
+          }
+          return;
+        }
+
         if (data?.source === "dynamic-widget-bridge" && data.type === "send-prompt") {
           const prompt = String(data.prompt || "").trim();
           if (prompt) {
@@ -392,7 +537,7 @@ export function App() {
       }
 
       if (message.method === "ui/notifications/tool-input") {
-        const toolInput = (message.params || {}) as Record<string, unknown>;
+        const toolInput = normalizeBridgeRecord(message.params || {});
         setHostToolInput(toolInput);
         const nextQuery = extractQuery(toolInput);
         if (nextQuery) {
@@ -401,7 +546,7 @@ export function App() {
       }
 
       if (message.method === "ui/notifications/tool-result") {
-        const structuredContent = (message.params?.structuredContent || {}) as Record<string, unknown>;
+        const structuredContent = normalizeBridgeRecord(message.params?.structuredContent || {});
         setHostToolOutput(structuredContent);
         const nextRunId = extractRunId(structuredContent);
         if (nextRunId) {
@@ -433,6 +578,7 @@ export function App() {
     async function startStream() {
       try {
         setReconnecting(false);
+        setConnectionError("");
         const snapshot = await loadSnapshot(runId);
         if (cancelled) {
           return;
@@ -444,7 +590,7 @@ export function App() {
           return;
         }
 
-        source = new EventSource(`/api/runs/${runId}/stream`);
+        source = new EventSource(buildApiUrl(`/api/runs/${runId}/stream`, hostToolOutput));
         source.onopen = () => {
           setConnected(true);
           setReconnecting(false);
@@ -463,27 +609,33 @@ export function App() {
               }
               if (nextSnapshot?.status === "running") {
                 setReconnecting(true);
+                setConnectionError("Stream disconnected. Retrying connection to the app backend.");
                 retryTimeout = window.setTimeout(() => {
                   setRetryToken((value) => value + 1);
                 }, 1200);
               } else {
                 setReconnecting(false);
+                setConnectionError("");
               }
             })
-            .catch(() => {
+            .catch((error) => {
               if (cancelled) {
                 return;
               }
+              const message = error instanceof Error ? error.message : String(error);
+              setConnectionError(`Unable to reach the app backend: ${message}`);
               retryTimeout = window.setTimeout(() => {
                 setRetryToken((value) => value + 1);
               }, 1500);
             });
         };
-      } catch (_error) {
+      } catch (error) {
         if (cancelled) {
           return;
         }
         setReconnecting(false);
+        const message = error instanceof Error ? error.message : String(error);
+        setConnectionError(`Failed to start the live stream: ${message}`);
       }
     }
 
@@ -497,11 +649,19 @@ export function App() {
       }
       source?.close();
     };
-  }, [retryToken, runId]);
+  }, [hostToolOutput, retryToken, runId]);
+
+  useEffect(() => {
+    setWidgetFrameHeight(480);
+  }, [derived.widgetCode, derived.widgetTitle]);
 
   useEffect(() => {
     if (window.openai?.notifyIntrinsicHeight) {
-      window.openai.notifyIntrinsicHeight(document.documentElement.scrollHeight);
+      try {
+        window.openai.notifyIntrinsicHeight(document.documentElement.scrollHeight);
+      } catch (_error) {
+        // Ignore host bridge sizing errors so the widget still renders.
+      }
     }
   }, [connected, derived, events.length, hostToolInput, hostToolOutput, runId]);
 
@@ -576,6 +736,10 @@ export function App() {
             <a className="link-button" href={derived.reconnectUrl} target="_blank" rel="noreferrer">
               Reconnect Salesforce
             </a>
+          ) : hostMode ? (
+            <button type="button" className="secondary" onClick={() => void handleReconnectSalesforce()}>
+              Reconnect Salesforce
+            </button>
           ) : null}
         </section>
       ) : null}
@@ -601,6 +765,7 @@ export function App() {
           ) : (
             <p className="empty">No text streamed yet.</p>
           )}
+          {connectionError ? <p className="error">{connectionError}</p> : null}
           {derived.toolError ? <p className="error">{derived.toolError}</p> : null}
         </section>
       </section>
@@ -638,6 +803,7 @@ export function App() {
             sandbox="allow-scripts allow-popups"
             srcDoc={buildWidgetDocument(derived.widgetCode)}
             title={derived.widgetTitle || "Generated widget"}
+            style={{ height: `${widgetFrameHeight}px` }}
           />
         ) : (
           <p className="empty">Widget preview will appear here when the backend emits it.</p>
@@ -646,12 +812,12 @@ export function App() {
 
       <section className="panel">
         <h2>Host Globals</h2>
-        <pre>{JSON.stringify({ toolInput: hostToolInput, toolOutput: hostToolOutput }, null, 2)}</pre>
+        <pre>{safeSerialize({ toolInput: hostToolInput, toolOutput: hostToolOutput })}</pre>
       </section>
 
       <section className="panel">
         <h2>Raw Event Feed</h2>
-        <pre>{JSON.stringify(events, null, 2)}</pre>
+        <pre>{safeSerialize(events)}</pre>
       </section>
     </main>
   );

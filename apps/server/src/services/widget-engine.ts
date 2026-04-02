@@ -23,7 +23,7 @@ export type WidgetGenerationInput = {
   query: string;
   groundedText?: string;
   citations?: SharedCitation[];
-  upstreamMode?: "shared-auth-service" | "demo";
+  upstreamMode?: "shared-auth-service" | "direct-agentforce" | "demo";
 };
 
 type VisualizePlan = {
@@ -52,10 +52,11 @@ export function buildWidgetPreviewHtml(query: string): string {
   return [
     "<style>",
     ":root { color-scheme: light; }",
-    "body { margin: 0; font-family: Inter, system-ui, sans-serif; background: linear-gradient(180deg, #f7f4ed 0%, #ffffff 100%); color: #1f2937; }",
+    ':root { --font-sans: "Geist", Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif; --font-serif: "Instrument Serif", Georgia, "Times New Roman", serif; --font-mono: "SF Mono", "Fira Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }',
+    'body { margin: 0; font-family: var(--font-sans); font-feature-settings: "cv03", "cv04", "cv11"; background: linear-gradient(180deg, #f7f4ed 0%, #ffffff 100%); color: #1f2937; }',
     ".preview-shell { padding: 20px; border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 20px; background: rgba(255,255,255,0.88); box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08); }",
     ".preview-label { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: #8b5e3c; margin-bottom: 10px; }",
-    ".preview-title { font-size: 26px; line-height: 1.2; margin: 0 0 8px; }",
+    ".preview-title { font-family: var(--font-serif); font-size: 30px; font-weight: 400; letter-spacing: -0.03em; line-height: 0.98; margin: 0 0 8px; }",
     ".preview-copy { font-size: 14px; color: #475569; margin: 0; }",
     ".preview-bar { margin-top: 18px; height: 10px; border-radius: 999px; background: linear-gradient(90deg, #d97706, #f59e0b, #fde68a); background-size: 180% 100%; animation: sweep 1.4s ease-in-out infinite; }",
     "@keyframes sweep { 0% { background-position: 100% 0; } 100% { background-position: -80% 0; } }",
@@ -90,16 +91,17 @@ export function buildFinalWidgetHtml(input: WidgetGenerationInput): string {
   return [
     "<style>",
     ":root { color-scheme: light; }",
-    "body { margin: 0; font-family: Inter, system-ui, sans-serif; background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); color: #0f172a; }",
+    ':root { --font-sans: "Geist", Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif; --font-serif: "Instrument Serif", Georgia, "Times New Roman", serif; --font-mono: "SF Mono", "Fira Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }',
+    'body { margin: 0; font-family: var(--font-sans); font-feature-settings: "cv03", "cv04", "cv11"; background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); color: #0f172a; }',
     ".workspace { padding: 22px; display: grid; gap: 16px; }",
     ".hero { padding: 20px; border-radius: 24px; background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%); color: #fff; box-shadow: 0 24px 60px rgba(30, 41, 59, 0.25); }",
     ".eyebrow { font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; opacity: 0.72; margin-bottom: 12px; }",
-    ".hero h1 { margin: 0 0 10px; font-size: 28px; line-height: 1.15; }",
+    ".hero h1 { margin: 0 0 10px; font-family: var(--font-serif); font-size: 34px; font-weight: 400; letter-spacing: -0.03em; line-height: 0.98; }",
     ".hero p { margin: 0; font-size: 14px; color: rgba(255,255,255,0.82); }",
     ".metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }",
     ".metric { padding: 16px; border-radius: 18px; background: rgba(255,255,255,0.92); border: 1px solid rgba(148, 163, 184, 0.2); }",
     ".metric-label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; }",
-    ".metric-value { margin-top: 8px; font-size: 26px; font-weight: 700; }",
+    ".metric-value { margin-top: 8px; font-size: 26px; font-weight: 500; }",
     ".panel { padding: 18px; border-radius: 20px; background: rgba(255,255,255,0.92); border: 1px solid rgba(148, 163, 184, 0.18); }",
     ".bar-row { display: grid; gap: 10px; margin-top: 12px; }",
     ".bar { height: 10px; border-radius: 999px; background: linear-gradient(90deg, #1d4ed8 var(--value), #e2e8f0 var(--value)); }",

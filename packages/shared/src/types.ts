@@ -40,6 +40,7 @@ export type StartDynamicRunResult = {
   status: "started";
   connected: boolean;
   reconnectUrl: string | null;
+  apiBaseUrl?: string;
   streamPath?: string;
 };
 

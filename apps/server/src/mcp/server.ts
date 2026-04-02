@@ -10,6 +10,7 @@ import {
   getDynamicRunWidgetHtml
 } from "../widget/resource.js";
 import { getConfig } from "../config.js";
+import type { setupOAuth } from "../oauth.js";
 
 type JsonRpcRequest = {
   jsonrpc?: string;
@@ -42,6 +43,7 @@ export function registerMcpRoute(
   deps: {
     authAdapter: AuthAdapter;
     runOrchestrator: RunOrchestrator;
+    oauth: ReturnType<typeof setupOAuth> | null;
   }
 ): void {
   const config = getConfig();
@@ -54,9 +56,13 @@ export function registerMcpRoute(
     });
   });
 
-  app.post("/mcp", async (req, res) => {
+  const mcpPostMiddleware = deps.oauth ? [deps.oauth.authMiddleware] : [];
+  const rootMcpPostMiddleware = deps.oauth ? [deps.oauth.rootAuthMiddleware] : [];
+
+  const handleMcpPost = async (req: any, res: any) => {
     const body = (req.body || {}) as JsonRpcRequest;
     const method = String(body.method || "");
+    const authenticatedChatgptUsername = String(req.auth?.extra?.chatgptUsername || "").trim();
 
     try {
       if (method === "initialize") {
@@ -178,8 +184,14 @@ export function registerMcpRoute(
         const name = String(body.params?.name || "");
 
         if (name === "start_dynamic_run") {
+          const rawArguments = ((body.params?.arguments || {}) as StartDynamicRunInput) || {};
+          const normalizedArguments: StartDynamicRunInput = {
+            ...rawArguments,
+            chatgptUsername: String(rawArguments.chatgptUsername || authenticatedChatgptUsername || "").trim() || undefined
+          };
+
           const result = await startDynamicRun(
-            (body.params?.arguments || {}) as StartDynamicRunInput,
+            normalizedArguments,
             deps
           );
 
@@ -193,8 +205,9 @@ export function registerMcpRoute(
               ],
               structuredContent: {
                 ...result,
+                apiBaseUrl: config.appBaseUrl,
                 widget: {
-                  uri: "ui://widget/dynamic-run.html",
+                  uri: DYNAMIC_RUN_WIDGET_URI,
                   title: "Dynamic Run Workspace",
                   mode: "streaming"
                 }
@@ -203,7 +216,7 @@ export function registerMcpRoute(
                 ui: {
                   resourceUri: DYNAMIC_RUN_WIDGET_URI
                 },
-                "openai/outputTemplate": "ui://widget/dynamic-run.html",
+                "openai/outputTemplate": DYNAMIC_RUN_WIDGET_URI,
                 "openai/widgetAccessible": true,
                 "openai/resultCanProduceWidget": true
               }
@@ -213,12 +226,11 @@ export function registerMcpRoute(
         }
 
         if (name === "connect_salesforce") {
+          const rawArguments = (body.params?.arguments as Record<string, unknown> | undefined) || {};
           const connect = await deps.authAdapter.getConnectUrl(
-            String((body.params?.arguments as Record<string, unknown> | undefined)?.chatgptUsername || ""),
+            String(rawArguments.chatgptUsername || authenticatedChatgptUsername || ""),
             {
-              loginUrl: String(
-                (body.params?.arguments as Record<string, unknown> | undefined)?.loginUrl || ""
-              )
+              loginUrl: String(rawArguments.loginUrl || "")
             }
           );
 
@@ -247,5 +259,8 @@ export function registerMcpRoute(
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json(jsonRpcError(body.id, -32000, message));
     }
-  });
+  };
+
+  app.post("/mcp", ...mcpPostMiddleware, handleMcpPost);
+  app.post("/", ...rootMcpPostMiddleware, handleMcpPost);
 }

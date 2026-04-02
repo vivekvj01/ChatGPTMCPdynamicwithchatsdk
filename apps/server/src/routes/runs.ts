@@ -12,6 +12,20 @@ export function registerRunRoutes(
     runOrchestrator: RunOrchestrator;
   }
 ): void {
+  app.use("/api/runs", (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Expose-Headers", "X-Run-Active");
+
+    if (req.method === "OPTIONS") {
+      res.status(204).end();
+      return;
+    }
+
+    next();
+  });
+
   app.post("/api/runs", async (req, res) => {
     try {
       const result = await startDynamicRun(req.body as StartDynamicRunInput, deps);

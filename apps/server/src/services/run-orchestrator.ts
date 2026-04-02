@@ -1,6 +1,7 @@
 import { createStreamEvent, type StartDynamicRunInput } from "@chatgpt-mcp-dynamic/shared";
 import { completeRun, emitEvent, getRun } from "../runs/store.js";
 import type { AuthAdapter } from "../auth/adapter.js";
+import type { DirectAgentforceService } from "./direct-agentforce.js";
 import type { WidgetEngine } from "./widget-engine.js";
 
 function sleep(ms: number): Promise<void> {
@@ -32,6 +33,7 @@ function isAbortError(error: unknown): boolean {
 export class RunOrchestrator {
   constructor(
     private readonly authAdapter: AuthAdapter,
+    private readonly directAgentforce: DirectAgentforceService,
     private readonly widgetEngine: WidgetEngine
   ) {}
 
@@ -43,7 +45,7 @@ export class RunOrchestrator {
     const reasoningId = `${runId}_reasoning`;
     const textId = `${runId}_text`;
     const visualizeToolCallId = `${runId}_visualize`;
-    const messageToolCallId = `${runId}_message`;
+    const searchToolCallId = `${runId}_search`;
     const toolCallId = `${runId}_widget`;
     const signal = ensureRunning(runId);
 
@@ -67,7 +69,27 @@ export class RunOrchestrator {
         loginUrl: input.loginUrl
       });
 
-      if (!auth.connected) {
+      if (!auth.connected || (!auth.session && auth.mode !== "demo")) {
+        let reconnectUrl = auth.reconnectUrl;
+        if (!reconnectUrl) {
+          try {
+            const reconnect = await this.authAdapter.getConnectUrl(input.chatgptUsername || "", {
+              loginUrl: input.loginUrl
+            });
+            reconnectUrl = reconnect.reconnectUrl;
+          } catch (connectError) {
+            const connectMessage =
+              connectError instanceof Error ? connectError.message : String(connectError);
+            emitEvent(
+              runId,
+              createStreamEvent("reasoning-delta", runId, {
+                id: reasoningId,
+                delta: `Reconnect URL lookup failed: ${connectMessage}\n`
+              })
+            );
+          }
+        }
+
         emitEvent(
           runId,
           createStreamEvent("reasoning-delta", runId, {
@@ -87,9 +109,20 @@ export class RunOrchestrator {
         emitEvent(runId, createStreamEvent("text-end", runId, { id: textId }));
         emitEvent(
           runId,
+          createStreamEvent("tool-output-available", runId, {
+            toolCallId: "connect_salesforce",
+            toolName: "connect_salesforce",
+            output: {
+              reconnectUrl,
+              connected: false
+            }
+          })
+        );
+        emitEvent(
+          runId,
           createStreamEvent("tool-output-error", runId, {
             toolCallId: "connect_salesforce",
-            errorText: auth.reconnectUrl || "Authentication required."
+            errorText: reconnectUrl || "Authentication required."
           })
         );
         emitEvent(
@@ -97,7 +130,7 @@ export class RunOrchestrator {
           createStreamEvent("run-complete", runId, {
             status: "completed",
             authRequired: true,
-            reconnectUrl: auth.reconnectUrl
+            reconnectUrl
           })
         );
         completeRun(runId, "completed");
@@ -114,50 +147,123 @@ export class RunOrchestrator {
       emitEvent(
         runId,
         createStreamEvent("tool-input-start", runId, {
-          toolCallId: messageToolCallId,
-          toolName: "message_endpoint"
+          toolCallId: searchToolCallId,
+          toolName: "search_agent"
         })
       );
       emitEvent(
         runId,
         createStreamEvent("tool-input-available", runId, {
-          toolCallId: messageToolCallId,
-          toolName: "message_endpoint",
+          toolCallId: searchToolCallId,
+          toolName: "search_agent",
           input: {
             query: input.query,
-            conversationKey: input.conversationKey || runId
+            conversationKey: input.conversationKey || runId,
+            transport: "direct-agentforce-stream"
           }
         })
       );
-
       emitEvent(
         runId,
         createStreamEvent("reasoning-delta", runId, {
           id: reasoningId,
-          delta: "Running shared auth service agent query.\n"
+          delta: "Opening direct Agentforce grounded search stream.\n"
         })
       );
+      emitEvent(runId, createStreamEvent("text-start", runId, { id: textId }));
 
-      const grounded = await this.authAdapter.runSharedAgentQuery(
-        input.chatgptUsername || "",
-        input.conversationKey || runId,
-        input.query,
-        { loginUrl: input.loginUrl }
-      );
+      let streamedText = "";
+      const grounded = await this.directAgentforce.runSearch({
+        session: auth.session,
+        query: input.query,
+        signal,
+        onEvent: (event) => {
+          if (signal.aborted) {
+            return;
+          }
+
+          switch (event.type) {
+            case "progress":
+              emitEvent(
+                runId,
+                createStreamEvent("reasoning-delta", runId, {
+                  id: reasoningId,
+                  delta: `${event.message}\n`
+                })
+              );
+              break;
+            case "text-chunk":
+              if (event.text) {
+                streamedText += event.text;
+                emitEvent(
+                  runId,
+                  createStreamEvent("text-delta", runId, {
+                    id: textId,
+                    delta: event.text
+                  })
+                );
+              }
+              break;
+            case "inform":
+              emitEvent(
+                runId,
+                createStreamEvent("reasoning-delta", runId, {
+                  id: reasoningId,
+                  delta:
+                    event.citations.length > 0
+                      ? `Search Agent returned ${event.citations.length} citation${event.citations.length === 1 ? "" : "s"}.\n`
+                      : "Search Agent returned a grounded answer.\n"
+                })
+              );
+              break;
+            case "validation-failure":
+              emitEvent(
+                runId,
+                createStreamEvent("reasoning-delta", runId, {
+                  id: reasoningId,
+                  delta: `Search Agent validation warning: ${event.message}\n`
+                })
+              );
+              break;
+            case "end":
+              emitEvent(
+                runId,
+                createStreamEvent("reasoning-delta", runId, {
+                  id: reasoningId,
+                  delta: "Direct Agentforce stream completed.\n"
+                })
+              );
+              break;
+            default:
+              break;
+          }
+        }
+      });
 
       if (signal.aborted) {
         completeRun(runId, "aborted");
         return;
       }
 
+      if (!streamedText.trim() && grounded.text.trim()) {
+        for (const chunk of chunkText(grounded.text)) {
+          if (signal.aborted) {
+            completeRun(runId, "aborted");
+            return;
+          }
+          emitEvent(runId, createStreamEvent("text-delta", runId, { id: textId, delta: chunk }));
+          await sleep(40);
+        }
+      }
+      emitEvent(runId, createStreamEvent("text-end", runId, { id: textId }));
+
       emitEvent(
         runId,
         createStreamEvent("tool-output-available", runId, {
-          toolCallId: messageToolCallId,
-          toolName: "message_endpoint",
+          toolCallId: searchToolCallId,
+          toolName: "search_agent",
           output: {
             mode: grounded.mode,
-            unsupported: grounded.unsupported,
             summary: grounded.summary,
             citations: grounded.citations
           }
@@ -168,9 +274,10 @@ export class RunOrchestrator {
         runId,
         createStreamEvent("reasoning-delta", runId, {
           id: reasoningId,
-          delta: grounded.unsupported
-            ? "Shared auth service query endpoint is unsupported in this environment. Falling back to local summary.\n"
-            : `Grounded result received via ${grounded.mode}.\n`
+          delta:
+            grounded.mode === "direct-agentforce"
+              ? "Grounded result received from the direct Agentforce stream.\n"
+              : "Direct Agentforce config is unavailable in this environment, so the run is using demo grounding.\n"
         })
       );
 
@@ -279,16 +386,6 @@ export class RunOrchestrator {
 
       await sleep(150);
       emitEvent(runId, createStreamEvent("reasoning-end", runId, { id: reasoningId }));
-      emitEvent(runId, createStreamEvent("text-start", runId, { id: textId }));
-      for (const chunk of chunkText(widget.assistantText)) {
-        if (signal.aborted) {
-          completeRun(runId, "aborted");
-          return;
-        }
-        emitEvent(runId, createStreamEvent("text-delta", runId, { id: textId, delta: chunk }));
-        await sleep(60);
-      }
-      emitEvent(runId, createStreamEvent("text-end", runId, { id: textId }));
 
       emitEvent(
         runId,
@@ -302,7 +399,9 @@ export class RunOrchestrator {
             provider: widget.provider,
             repaired: widget.repaired,
             modules: widget.modules,
-            citations: grounded.citations
+            citations: grounded.citations,
+            groundedMode: grounded.mode,
+            assistantText: widget.assistantText
           }
         })
       );

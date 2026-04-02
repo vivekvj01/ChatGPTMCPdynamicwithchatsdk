@@ -1,10 +1,11 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig } from "../config.js";
+import { resolveWidgetDistDir } from "../paths.js";
 
-const widgetDistDir = path.resolve(process.cwd(), "apps/widget/dist");
+const widgetDistDir = resolveWidgetDistDir(import.meta.url);
 
-export const DYNAMIC_RUN_WIDGET_URI = "ui://widget/dynamic-run.html";
+export const DYNAMIC_RUN_WIDGET_URI = "ui://widget/dynamic-run-v2.html";
 export const DYNAMIC_RUN_WIDGET_MIME_TYPE = "text/html;profile=mcp-app";
 
 function originFromBaseUrl(baseUrl: string): string {
@@ -15,11 +16,44 @@ function originFromBaseUrl(baseUrl: string): string {
   }
 }
 
-function withAbsoluteAssetPaths(html: string, baseUrl: string): string {
-  return html.replaceAll('href="/widget-assets/', `href="${baseUrl}/widget-assets/`).replaceAll(
-    'src="/widget-assets/',
-    `src="${baseUrl}/widget-assets/`
-  );
+function escapeInlineScript(value: string): string {
+  return String(value || "").replace(/<\/script/gi, "<\\/script");
+}
+
+async function inlineBuiltWidgetHtml(baseUrl: string): Promise<string> {
+  const indexHtml = await readFile(path.join(widgetDistDir, "index.html"), "utf8");
+  const scriptMatch = indexHtml.match(/<script[^>]+src="([^"]+)"[^>]*><\/script>/i);
+  const styleMatch = indexHtml.match(/<link[^>]+href="([^"]+)"[^>]*>/i);
+
+  const scriptPath = scriptMatch?.[1];
+  const stylePath = styleMatch?.[1];
+
+  if (!scriptPath || !stylePath) {
+    throw new Error("Widget bundle assets were not found in index.html.");
+  }
+
+  const normalizedScriptPath = scriptPath.replace(/^\//, "");
+  const normalizedStylePath = stylePath.replace(/^\//, "");
+  const [scriptContent, styleContent] = await Promise.all([
+    readFile(path.join(widgetDistDir, normalizedScriptPath.replace(/^widget-assets\//, "")), "utf8"),
+    readFile(path.join(widgetDistDir, normalizedStylePath.replace(/^widget-assets\//, "")), "utf8")
+  ]);
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>${styleContent}</style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      window.__DYNAMIC_WIDGET_CONFIG__ = ${JSON.stringify({ appBaseUrl: baseUrl }).replace(/</g, "\\u003c")};
+    </script>
+    <script type="module">${escapeInlineScript(scriptContent)}</script>
+  </body>
+</html>`;
 }
 
 function fallbackWidgetHtml(baseUrl: string): string {
@@ -32,7 +66,8 @@ function fallbackWidgetHtml(baseUrl: string): string {
       body {
         margin: 0;
         padding: 24px;
-        font-family: Inter, system-ui, sans-serif;
+        font-family: "Geist", Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
+        font-feature-settings: "cv03", "cv04", "cv11";
         background: #f8fafc;
         color: #0f172a;
       }
@@ -43,7 +78,7 @@ function fallbackWidgetHtml(baseUrl: string): string {
         padding: 20px;
       }
       code {
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-family: "SF Mono", "Fira Code", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
       }
     </style>
   </head>
@@ -59,8 +94,7 @@ function fallbackWidgetHtml(baseUrl: string): string {
 
 export async function getDynamicRunWidgetHtml(config: AppConfig): Promise<string> {
   try {
-    const indexHtml = await readFile(path.join(widgetDistDir, "index.html"), "utf8");
-    return withAbsoluteAssetPaths(indexHtml, config.appBaseUrl);
+    return await inlineBuiltWidgetHtml(config.appBaseUrl);
   } catch {
     return fallbackWidgetHtml(config.appBaseUrl);
   }
