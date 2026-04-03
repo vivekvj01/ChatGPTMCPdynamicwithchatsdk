@@ -339,18 +339,6 @@ export class RunOrchestrator {
           input: { title: "dynamic_run_preview" }
         })
       );
-      emitEvent(
-        runId,
-        createStreamEvent("tool-output-available", runId, {
-          toolCallId,
-          toolName: "show_widget",
-          output: {
-            title: "dynamic_run_preview",
-            widget_code: this.widgetEngine.buildPreview(input.query),
-            complete: false
-          }
-        })
-      );
 
       const widget = await this.widgetEngine.generate({
         query: input.query,
@@ -384,21 +372,6 @@ export class RunOrchestrator {
           })
         );
       }
-      emitEvent(
-        runId,
-        createStreamEvent("tool-output-available", runId, {
-          toolCallId,
-          toolName: "show_widget",
-          output: {
-            title: widget.previewTitle,
-            widget_code: widget.previewWidgetCode,
-            complete: false,
-            provider: widget.provider,
-            modules: widget.modules
-          }
-        })
-      );
-
       await sleep(150);
       emitEvent(runId, createStreamEvent("reasoning-end", runId, { id: reasoningId }));
 

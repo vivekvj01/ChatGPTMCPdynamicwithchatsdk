@@ -12,6 +12,10 @@ export type AppConfig = {
   salesforceAgentApiBaseUrl: string;
   openaiApiKey: string;
   openaiWidgetModel: string;
+  herokuInferenceKey: string;
+  herokuInferenceUrl: string;
+  herokuInferenceModel: string;
+  widgetProviderOrder: string;
 };
 
 function requiredEnv(name: string, fallback = ""): string {
@@ -31,6 +35,10 @@ export function getConfig(): AppConfig {
     salesforceLoginUrl: requiredEnv("SALESFORCE_LOGIN_URL"),
     salesforceAgentApiBaseUrl: requiredEnv("SALESFORCE_AGENT_API_BASE_URL"),
     openaiApiKey: requiredEnv("OPENAI_API_KEY"),
-    openaiWidgetModel: requiredEnv("OPENAI_WIDGET_MODEL", "gpt-5.4-mini")
+    openaiWidgetModel: requiredEnv("OPENAI_WIDGET_MODEL", "gpt-5.4-mini"),
+    herokuInferenceKey: requiredEnv("INFERENCE_KEY"),
+    herokuInferenceUrl: requiredEnv("INFERENCE_URL", "https://us.inference.heroku.com/v1/chat/completions"),
+    herokuInferenceModel: requiredEnv("INFERENCE_MODEL_ID", "claude-4-5-sonnet"),
+    widgetProviderOrder: requiredEnv("WIDGET_PROVIDER_ORDER", "heroku,openai,demo")
   };
 }
