@@ -8,7 +8,7 @@ Build the app in three milestones:
 - dynamic streaming UI
 - production hardening
 
-This sequence is designed to get a working ChatGPT-native demo quickly while preserving the looser Anush-style widget generation strategy.
+This sequence is designed to get a working ChatGPT-native demo quickly while preserving the looser widget generation strategy.
 
 ## Current Implementation Status
 
