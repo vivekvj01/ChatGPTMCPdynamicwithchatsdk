@@ -15,11 +15,11 @@ The target product should live inside ChatGPT, not as a standalone app. The chos
 - `Apps SDK + MCP` for ChatGPT-native integration
 - `Cloud Run` for hosting
 - `custom iframe React UI` for rendering and streaming UX
-- `custom SSE backend` for Anush-style live updates
+- `custom SSE backend` for live updates
 - `LLM-generated widget_code` for dynamic UI
 - `validation + repair loop` for reliability
 
-This intentionally follows a looser dynamic UI strategy similar to `Anushlatest code`, instead of limiting the app to fixed widget templates.
+This intentionally follows a looser dynamic UI strategy , instead of limiting the app to fixed widget templates.
 
 ## Repo Structure
 
@@ -32,7 +32,7 @@ This intentionally follows a looser dynamic UI strategy similar to `Anushlatest 
 - Native ChatGPT experience
 - Shared auth service reuse with minimal risk
 - Rich streaming UI inside the widget iframe
-- Dynamic model-generated UI similar to `Anushlatest code`
+- Dynamic model-generated UI 
 - Flexible path for charts, dashboards, explainers, and record detail views
 
 ## Non-Goals
@@ -94,4 +94,4 @@ Remaining follow-on work is optional product hardening rather than missing MVP s
 ## Reference Codebases
 
 - Shared auth pattern: `/Users/vivek.viswanathan/Desktop/FinalChatGPTApp`
-- Dynamic widget and streaming patterns: `/Users/vivek.viswanathan/Desktop/Anushlatest code`
+
